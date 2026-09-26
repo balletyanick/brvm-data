@@ -1,0 +1,7 @@
+# Fins de ligne normalisees en LF partout : sans cela, le runner Linux et la
+# copie Windows se renverraient des diffs sur les 245 CSV a chaque execution.
+* text=auto eol=lf
+*.csv text eol=lf
+*.py  text eol=lf
+*.yml text eol=lf
+*.md  text eol=lf
