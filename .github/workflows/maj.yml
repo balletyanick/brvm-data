@@ -1,0 +1,46 @@
+name: Mise a jour des donnees BRVM
+
+on:
+  schedule:
+    # 16h30 UTC, du lundi au vendredi. La BRVM ferme a 15h00 UTC.
+    - cron: "30 16 * * 1-5"
+  workflow_dispatch:        # bouton "Run workflow" pour lancer a la main
+
+permissions:
+  contents: write           # necessaire pour que le job puisse commiter
+
+concurrency:
+  group: maj-donnees
+  cancel-in-progress: false
+
+jobs:
+  collecte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Aucune dependance externe : le collecteur n'utilise que la
+      # bibliotheque standard. Rien a installer.
+
+      - name: Collecter les cours
+        run: python scraper/collecte.py
+
+      - name: Commiter les donnees
+        run: |
+          git config user.name "brvm-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "Aucun changement, rien a commiter."
+          else
+            git commit -m "Donnees du $(date -u +%Y-%m-%d)"
+            git push
+          fi
