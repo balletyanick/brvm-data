@@ -8,11 +8,16 @@ Pour chaque ticker, recupere l'historique complet en JSON et ecrit cinq CSV :
   data/{T}/{T}.quarterly.csv  agrege, dernier jour du trimestre
   data/{T}/{T}.yearly.csv     agrege, 31 decembre
 
+Traite aussi les 18 indices (BRVMC, BRVM30, ...), qui passent par un autre
+endpoint et dont la reponse porte la cle `cours` au lieu de `ohlc`. La serie du
+BRVM Composite est indispensable : c'est la reference du Beta calcule en
+phase 2, et le seul etalon de performance du portefeuille.
+
 Aucune dependance externe : uniquement la bibliotheque standard.
 
 Usage :
-    python collecte.py              tous les tickers
-    python collecte.py NSBC SNTS    seulement ceux-la
+    python collecte.py              actions + indices
+    python collecte.py NSBC BRVMC   seulement ceux-la
 """
 import csv, datetime, io, json, os, sys, time, urllib.error, urllib.request
 
@@ -21,8 +26,10 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOSSIER_DATA = os.path.join(RACINE, "data")
 TICKERS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tickers.json")
+INDICES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "indices.json")
 
 BASE = "https://www.richbourse.com/common/mouvements/technique-donnees"
+BASE_INDICE = "https://www.richbourse.com/common/mouvements/indice-donnees"
 ENTETES = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "X-Requested-With": "XMLHttpRequest",
@@ -37,11 +44,21 @@ COLONNES = ["Date", "Open", "High", "Low", "Close", "Volume"]
 
 # ----------------------------------------------------------------- reseau
 
-def recuperer(ticker):
-    """Retourne [(date, o, h, l, c, v), ...] trie par date, ou leve une exception."""
-    url = "%s?symbole=%s&complet=1" % (BASE, ticker)
+def recuperer(ticker, alias=None):
+    """Retourne [(date, o, h, l, c, v), ...] trie par date, ou leve une exception.
+
+    `alias` non nul = indice : autre endpoint, autre parametre, autre page de
+    reference. Les indices n'ont ni volume ni OHLC, seulement un point de
+    cloture par seance.
+    """
+    if alias:
+        url = "%s?alias_indice=%s&complet=1" % (BASE_INDICE, alias)
+        referer = "https://www.richbourse.com/common/mouvements/indice/%s" % alias
+    else:
+        url = "%s?symbole=%s&complet=1" % (BASE, ticker)
+        referer = "https://www.richbourse.com/common/mouvements/technique/%s" % ticker
     entetes = dict(ENTETES)
-    entetes["Referer"] = "https://www.richbourse.com/common/mouvements/technique/%s" % ticker
+    entetes["Referer"] = referer
 
     derniere = None
     for essai in range(1, ESSAIS + 1):
@@ -171,10 +188,10 @@ def ecrire(chemin, lignes):
     return True
 
 
-def traiter(ticker):
+def traiter(ticker, alias=None):
     """Retourne (ok, message, derniere_date)."""
     try:
-        lignes = recuperer(ticker)
+        lignes = recuperer(ticker, alias)
     except Exception as e:
         return False, "reseau : %s" % e, None
 
@@ -242,21 +259,35 @@ def diagnostic():
 
 
 def main():
-    table = json.load(open(TICKERS, encoding="utf-8"))["actions"]
-    demandes = [t.upper() for t in sys.argv[1:]] or sorted(table)
+    actions = json.load(open(TICKERS, encoding="utf-8"))["actions"]
+    indices = json.load(open(INDICES, encoding="utf-8"))["indices"]
+
+    # Chaque entree est un couple (ticker, alias) ; alias None pour une action.
+    lot = ([(t, None) for t in sorted(actions)]
+           + [(t, indices[t]) for t in sorted(indices)])
+    if sys.argv[1:]:
+        voulus = {t.upper() for t in sys.argv[1:]}
+        lot = [x for x in lot if x[0].upper() in voulus]
+        inconnus = voulus - {x[0].upper() for x in lot}
+        if inconnus:
+            print("Inconnu(s), ignore(s) : %s" % ", ".join(sorted(inconnus)))
+    demandes = lot
 
     os.makedirs(DOSSIER_DATA, exist_ok=True)
     diagnostic()
     print("Collecte de %d ticker(s)\n" % len(demandes))
 
     ok, echecs, dates = 0, [], []
-    for i, t in enumerate(demandes, 1):
-        reussi, message, derniere = traiter(t)
+    for i, (t, alias) in enumerate(demandes, 1):
+        reussi, message, derniere = traiter(t, alias)
         etat = "OK  " if reussi else "ECHEC"
-        print("  [%2d/%2d] %-6s %s %s" % (i, len(demandes), t, etat, message))
+        print("  [%2d/%2d] %-8s %s %s" % (i, len(demandes), t, etat, message))
         if reussi:
             ok += 1
-            if derniere:
+            # Seules les actions comptent pour le controle de fraicheur : les
+            # sept indices d'avant la reforme sont geles au 31/12/2025, ils
+            # feraient echouer le job tous les jours.
+            if derniere and alias is None:
                 dates.append(derniere)
         else:
             echecs.append((t, message))
