@@ -51,9 +51,21 @@ def recuperer(ticker):
                 ctype = r.headers.get("Content-Type", "")
                 brut = r.read()
             if "json" not in ctype:
-                raise ValueError("reponse non JSON (%s)" % ctype[:40])
+                # Diagnostic : savoir SI on est bloque, et par quoi.
+                apercu = brut[:180].decode("utf-8", "replace").replace("\n", " ")
+                raise ValueError("HTTP 200 mais type=%s | debut: %s"
+                                 % (ctype[:40], apercu))
             d = json.loads(brut.decode("utf-8"))
             break
+        except urllib.error.HTTPError as e:
+            corps = ""
+            try:
+                corps = e.read()[:180].decode("utf-8", "replace").replace("\n", " ")
+            except Exception:
+                pass
+            derniere = ValueError("HTTP %s %s | %s" % (e.code, e.reason, corps))
+            if essai < ESSAIS:
+                time.sleep(2 * essai)
         except Exception as e:
             derniere = e
             if essai < ESSAIS:
@@ -191,11 +203,50 @@ def traiter(ticker):
 
 # -------------------------------------------------------------------- main
 
+def diagnostic():
+    """Avant de lancer 49 requetes, dire d'ou l'on appelle et si la source
+    accepte l'appel. Sans cela, un blocage d'adresse IP ressemble a une panne
+    du collecteur."""
+    print("--- diagnostic ---")
+    try:
+        req = urllib.request.Request("https://api.ipify.org?format=json",
+                                     headers={"User-Agent": ENTETES["User-Agent"]})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print("  adresse publique : %s" % json.loads(r.read()).get("ip"))
+    except Exception as e:
+        print("  adresse publique : inconnue (%s)" % e)
+
+    url = "%s?symbole=NSBC&complet=1" % BASE
+    entetes = dict(ENTETES)
+    entetes["Referer"] = "https://www.richbourse.com/common/mouvements/technique/NSBC"
+    try:
+        req = urllib.request.Request(url, headers=entetes)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            ctype = r.headers.get("Content-Type", "")
+            taille = len(r.read())
+        print("  test richbourse  : HTTP %s | %s | %d octets" % (r.status, ctype[:40], taille))
+        if "json" not in ctype:
+            print("  >>> la source ne rend pas du JSON : appel probablement bloque")
+    except urllib.error.HTTPError as e:
+        corps = ""
+        try:
+            corps = e.read()[:200].decode("utf-8", "replace").replace("\n", " ")
+        except Exception:
+            pass
+        print("  test richbourse  : HTTP %s %s" % (e.code, e.reason))
+        print("  corps            : %s" % corps)
+        print("  >>> appel refuse par la source")
+    except Exception as e:
+        print("  test richbourse  : echec %s : %s" % (type(e).__name__, e))
+    print("--- fin diagnostic ---\n")
+
+
 def main():
     table = json.load(open(TICKERS, encoding="utf-8"))["actions"]
     demandes = [t.upper() for t in sys.argv[1:]] or sorted(table)
 
     os.makedirs(DOSSIER_DATA, exist_ok=True)
+    diagnostic()
     print("Collecte de %d ticker(s)\n" % len(demandes))
 
     ok, echecs, dates = 0, [], []
