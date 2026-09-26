@@ -76,7 +76,9 @@ présenté comme frais.
 5 ans = 1260. `1er_Janvier` = depuis la première séance de l'année en cours.
 Plus haut et plus bas viennent des colonnes `High` et `Low`, pas des clôtures.
 La variation compare la dernière clôture à la **première clôture de la
-fenêtre**.
+fenêtre**. Quand l'historique est plus court que la fenêtre, les trois champs
+restent **vides** : afficher la variation de BBGC sur deux séances dans la
+colonne « 1 an » en ferait un faux signal pour le screener.
 
 **Valorisation et Capital_Echange** — dépendent du nombre de titres, relevé sur
 la fiche société de richbourse et stocké dans `scraper/actions.json`. Laissés

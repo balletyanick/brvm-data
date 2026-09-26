@@ -212,6 +212,11 @@ def calculer(ticker, url_ticker, nb_actions, indice_par_date):
         v["Beta_1_An"] = arrondi(beta_1_an(par_date, indice_par_date), 2)
 
     for nom, taille in FENETRES:
+        if len(lignes) < taille:
+            # Pas assez d'historique : on laisse les trois champs vides.
+            # Afficher la variation de BBGC sur deux seances dans la
+            # colonne « 1 an » en ferait un faux signal pour le screener.
+            continue
         h, b, var = sur_fenetre(lignes[-taille:])
         v["%s_Plus_Haut" % nom] = nb(h)
         v["%s_Plus_Bas" % nom] = nb(b)
