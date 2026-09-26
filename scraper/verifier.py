@@ -1,78 +1,82 @@
 # -*- coding: utf-8 -*-
-"""Controle qualite de la collecte : comparaison avec l'ancien depot
-et coherence des agregations."""
-import csv, os, sys, datetime
+"""Controle de coherence des fichiers produits par collecte.py.
+
+Verifie que chaque agregation (weekly, monthly, quarterly, yearly) retombe
+sur la meme cloture finale et le meme volume cumule que le daily dont elle
+est tiree. Une agregation qui derive passe inapercue autrement : les cinq
+fichiers ont l'air corrects pris separement.
+
+Usage :
+    python verifier.py              NSBC, SNTS, BRVMC
+    python verifier.py NSBC BICC    ceux-la
+    python verifier.py --tout       les 67 tickers
+"""
+import csv, json, os, sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-NOUVEAU = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-ANCIEN = "C:/Users/Yanick/Desktop/BRVM/brvm-data-public/data"
+ICI = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(os.path.dirname(ICI), "data")
+PERIODES = ["weekly", "monthly", "quarterly", "yearly"]
 
 
-def lire(chemin):
-    if not os.path.exists(chemin):
-        return {}
-    out = {}
-    for r in csv.DictReader(open(chemin, encoding="utf-8")):
-        out[r["Date"]] = (r["Open"], r["High"], r["Low"], r["Close"], r["Volume"])
-    return out
+def verifier(ticker):
+    """Retourne le nombre d'anomalies trouvees."""
+    dossier = os.path.join(DATA, ticker)
+    quotidien = os.path.join(dossier, "%s.daily.csv" % ticker)
+    if not os.path.exists(quotidien):
+        print("%-8s daily.csv absent" % ticker)
+        return 1
 
-
-def egal(a, b):
-    try:
-        return all(abs(float(x or 0) - float(y or 0)) < 0.01 for x, y in zip(a, b))
-    except ValueError:
-        return a == b
-
-
-def comparer(ticker):
-    print("=" * 66)
-    print(ticker)
-    n = lire(os.path.join(NOUVEAU, ticker, "%s.daily.csv" % ticker))
-    a = lire(os.path.join(ANCIEN, ticker, "%s.daily.csv" % ticker))
-    if not a:
-        print("  pas d'ancien fichier, rien a comparer (%d seances collectees)" % len(n))
-        return
-    communes = sorted(set(n) & set(a))
-    if not communes:
-        print("  aucune date commune")
-        return
-    ecarts = [d for d in communes if not egal(n[d], a[d])]
-    print("  ancien   : %5d seances, jusqu'au %s" % (len(a), max(a)))
-    print("  nouveau  : %5d seances, jusqu'au %s" % (len(n), max(n)))
-    print("  communes : %5d  |  ecarts : %d" % (len(communes), len(ecarts)))
-    if ecarts:
-        for d in ecarts[:5]:
-            print("     %s  ancien=%s  nouveau=%s" % (d, a[d], n[d]))
-    else:
-        print("  -> identique sur toute la periode commune")
-    nouvelles = sorted(set(n) - set(a))
-    if nouvelles:
-        print("  seances gagnees : %d (du %s au %s)" % (len(nouvelles), nouvelles[0], nouvelles[-1]))
-
-
-def coherence(ticker):
-    """Le total des volumes et la derniere cloture doivent se retrouver
-    dans chaque agregation."""
-    d = os.path.join(NOUVEAU, ticker)
-    base = list(csv.DictReader(open(os.path.join(d, "%s.daily.csv" % ticker), encoding="utf-8")))
+    base = list(csv.DictReader(open(quotidien, encoding="utf-8")))
     if not base:
-        return
-    dernier_close = base[-1]["Close"]
-    total_vol = sum(float(r["Volume"] or 0) for r in base)
-    print("  agregations :")
-    for per in ["weekly", "monthly", "quarterly", "yearly"]:
-        rows = list(csv.DictReader(open(os.path.join(d, "%s.%s.csv" % (ticker, per)), encoding="utf-8")))
-        v = sum(float(r["Volume"] or 0) for r in rows)
-        ok_close = rows[-1]["Close"] == dernier_close
-        ok_vol = abs(v - total_vol) < 1
-        print("    %-10s %4d lignes  cloture finale %s  volume total %s"
-              % (per, len(rows), "OK" if ok_close else "DIFFERENT", "OK" if ok_vol else "DIFFERENT"))
+        print("%-8s daily.csv vide" % ticker)
+        return 1
+
+    cloture = base[-1]["Close"]
+    volume = sum(float(r["Volume"] or 0) for r in base)
+    print("%-8s %5d seances, du %s au %s"
+          % (ticker, len(base), base[0]["Date"], base[-1]["Date"]))
+
+    anomalies = 0
+    for periode in PERIODES:
+        chemin = os.path.join(dossier, "%s.%s.csv" % (ticker, periode))
+        if not os.path.exists(chemin):
+            print("           %-10s ABSENT" % periode)
+            anomalies += 1
+            continue
+        lignes = list(csv.DictReader(open(chemin, encoding="utf-8")))
+        if not lignes:
+            print("           %-10s VIDE" % periode)
+            anomalies += 1
+            continue
+        v = sum(float(r["Volume"] or 0) for r in lignes)
+        ecart_close = lignes[-1]["Close"] != cloture
+        ecart_vol = abs(v - volume) >= 1
+        anomalies += ecart_close + ecart_vol
+        print("           %-10s %4d lignes  cloture %s  volume %s"
+              % (periode, len(lignes),
+                 "DIFFERENTE" if ecart_close else "OK",
+                 "DIFFERENT" if ecart_vol else "OK"))
+    return anomalies
+
+
+def main():
+    if "--tout" in sys.argv:
+        ici = os.path.dirname(os.path.abspath(__file__))
+        cibles = sorted(json.load(open(os.path.join(ici, "tickers.json"), encoding="utf-8"))["actions"])
+        cibles += sorted(json.load(open(os.path.join(ici, "indices.json"), encoding="utf-8"))["indices"])
+    else:
+        cibles = [t.upper() for t in sys.argv[1:] if not t.startswith("--")] \
+                 or ["NSBC", "SNTS", "BRVMC"]
+
+    total = sum(verifier(t) for t in cibles)
+    print()
+    if total:
+        print("%d anomalie(s) sur %d ticker(s)." % (total, len(cibles)))
+        sys.exit(1)
+    print("%d ticker(s) verifie(s), agregations coherentes." % len(cibles))
 
 
 if __name__ == "__main__":
-    cibles = [t.upper() for t in sys.argv[1:]] or ["NSBC", "SNTS", "BBGC"]
-    for t in cibles:
-        comparer(t)
-        coherence(t)
-        print()
+    main()

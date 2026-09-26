@@ -115,7 +115,11 @@ XMLHttpRequest` obligatoires. Sans `&complet=1`, l'endpoint ne renvoie que 5 ans
 
 ## Qualité des données
 
-Contrôlées contre l'ancien dépôt sur 8 476 séances communes :
+Contrôlées, lors de la reprise, contre l'ancien dépôt `brvm-data-public`, sur
+8 476 séances communes. Cette copie locale a depuis été supprimée : elle ne
+contenait aucun ticker qui nous manque, et ses extrêmes intra-séance étaient
+identiques aux nôtres avant 2021, moins bons ensuite. Le tableau reste ici
+comme trace du contrôle :
 
 | Champ | Écarts |
 |---|---|
@@ -160,7 +164,7 @@ de vieilles données en silence fait prendre de mauvaises décisions.
 python scraper/collecte.py              # 49 actions + 18 indices
 python scraper/collecte.py NSBC BRVMC   # seulement ceux-là
 python scraper/indicateurs.py           # après la collecte, jamais avant
-python scraper/verifier.py NSBC         # contrôle qualité des cours
+python scraper/verifier.py --tout       # cohérence des agrégations
 python scraper/controle_rsi.py          # RSI contre la référence richbourse
 python scraper/faire_actions.py         # régénère scraper/actions.json
 ```
@@ -171,7 +175,7 @@ Aucune dépendance : bibliothèque standard Python uniquement.
 
 | Événement | Action |
 |---|---|
-| Nouvelle société cotée | Ajouter à `scraper/tickers.json`, à `ACTIONS` dans `faire_tickers.py`, et à `STOCK_TICKERS` dans le serveur MCP |
+| Nouvelle société cotée | Ajouter à `scraper/tickers.json` (ticker → suffixe pays) et à `STOCK_TICKERS` dans le serveur MCP. `faire_actions.py` relèvera son nombre de titres au passage suivant |
 | Nouvel indice | Ajouter à `scraper/indices.json` (ticker court → alias long) |
 | Augmentation de capital | `faire_actions.py` la rattrape au prochain passage, la ligne est marquée `CHANGEMENT` dans le journal |
 | **26 octobre 2026** | Fractionnement Sonatel, 1 action → 10. Vérifier ce jour-là si la source réajuste l'historique des cours ; `actions.json` se met à jour tout seul |
